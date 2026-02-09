@@ -14,5 +14,9 @@ Successful implementation of the IoT system provides for:<ul>
 <li>Communication amongst devices, enabling autonomous systems to operate in a more efficient and cooperative manner</li>
 <li>Minimal human interaction in the operation of assets on the lunar surface</li></ul></ul>
 
-
+Context Diagram:
 <img width="500" height="500" alt="Lunar IoT - Context Diagram" src="https://github.com/user-attachments/assets/815914ef-1292-4b19-991d-b76c04522db0" />
+<br>
+
+Data Flow:
+<img width="1465" height="984" alt="Untitled-2" src="https://github.com/user-attachments/assets/64ddc6de-7682-4937-8319-2334606a2ef3" />

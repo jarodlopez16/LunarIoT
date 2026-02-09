@@ -15,8 +15,8 @@ Successful implementation of the IoT system provides for:<ul>
 <li>Minimal human interaction in the operation of assets on the lunar surface</li></ul></ul>
 
 Context Diagram:<br>
-<img width="502" height="492" alt="Screenshot 2026-02-09 at 4 29 10 PM" src="https://github.com/user-attachments/assets/9bdfdeb1-e3ec-4d03-b939-6ae6b84dcf5e" />
+<img width="500" height="500" alt="Screenshot 2026-02-09 at 4 29 10 PM" src="https://github.com/user-attachments/assets/9bdfdeb1-e3ec-4d03-b939-6ae6b84dcf5e" />
 <br>
 
 Data Flow:<br>
-<img width="496" height="304" alt="image" src="https://github.com/user-attachments/assets/6a798a7f-1975-4b12-8f43-040c1a2c5f2a" />
+<img width="500" height="300" alt="image" src="https://github.com/user-attachments/assets/6a798a7f-1975-4b12-8f43-040c1a2c5f2a" />

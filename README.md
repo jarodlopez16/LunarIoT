@@ -1,5 +1,7 @@
 Lunar Internet of Things Project
 
+Contains source code, progress reports, and presentations.
+
 Goal: Build an Internet of Things (IoT) system for the lunar surface in collaboration with students from Rowan University and members of NASA’s Stennis Space Center. 
 <ul><li>Autonomous operations of lunar devices, enabling a rover to traverse the lunar surface in an efficient manner. </li>
 <li>Establish communications between devices over an MQTT broker, allowing for the reception and analysis of data (i.e. battery station power levels).</li>

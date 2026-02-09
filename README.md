@@ -9,7 +9,7 @@ WHY?: As NASA makes advancements in establishing a sustained human and robotic p
 <li>Autonomous decision making to reduce the impact of communication delays between the Earth and lunar surface.</li>
 <li>Efficient power management for extended missions in extreme lunar environments.</li>
 <li>Data systems to handle reception and sending of information for analysis.</li>
-<li>Compliments NASA’s LuCCI project</li>
+<li>Compliments NASA’s LuCCI project</li><br>
 Successful implementation of the IoT system provides for:<ul>
 <li>Communication amongst devices, enabling autonomous systems to operate in a more efficient and cooperative manner</li>
 <li>Minimal human interaction in the operation of assets on the lunar surface</li></ul></ul>

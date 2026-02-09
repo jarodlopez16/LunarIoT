@@ -19,4 +19,4 @@ Context Diagram:
 <br>
 
 Data Flow:
-<img width="1465" height="984" alt="Untitled-2" src="https://github.com/user-attachments/assets/64ddc6de-7682-4937-8319-2334606a2ef3" />
+<img width="750" height="500" alt="Untitled-2" src="https://github.com/user-attachments/assets/64ddc6de-7682-4937-8319-2334606a2ef3" />

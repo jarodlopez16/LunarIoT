@@ -8,8 +8,6 @@ ROLE OF THIS FILE
 
 """
 
-import threading
-import paho.mqtt.client as mqtt
 import math
 import json
 from dataclasses import dataclass
@@ -153,46 +151,6 @@ H = [
     [0.0, 0.0, 1.0],
 ]
 
-def soc_drop_for_distance(battery_specs, distance_m, power_w, speed_mps=0.2):
-    """
-    Estimate SOC drop for a battery station using PyBaMM.
-
-    battery_specs: dict with capacity_mAh, nominal_voltage
-    distance_m: meters
-    power_w: watts consumed by rover
-    speed_mps: meters per second
-    """
-    capacity_ah = battery_specs["capacity_mAh"] / 1000.0
-    nominal_voltage = battery_specs["nominal_voltage"]
-    
-    # Energy required to travel the distance
-    time_sec = distance_m / speed_mps
-    energy_used_j = power_w * time_sec
-    energy_used_wh = energy_used_j / 3600.0
-    
-    # SOC drop in percent
-    battery_energy_wh = capacity_ah * nominal_voltage
-    soc_drop = 100.0 * (energy_used_wh / battery_energy_wh)
-    
-    return soc_drop
-
-def add_obstacle_bbox(self, bbox: BBox):
-    """
-    Mark all cells covered by this bounding box as non-walkable.
-    """
-    # Convert top-left and bottom-right of bbox to local meters
-    x1_m, y1_m = apply_homography(bbox.x, bbox.y)
-    x2_m, y2_m = apply_homography(bbox.x + bbox.w, bbox.y + bbox.h)
-
-    # Convert to grid indices
-    ix1 = max(0, min(self.width - 1, int(x1_m / CELL_SIZE_M)))
-    iy1 = max(0, min(self.height - 1, int(y1_m / CELL_SIZE_M)))
-    ix2 = max(0, min(self.width - 1, int(x2_m / CELL_SIZE_M)))
-    iy2 = max(0, min(self.height - 1, int(y2_m / CELL_SIZE_M)))
-
-    for iy in range(iy1, iy2 + 1):
-        for ix in range(ix1, ix2 + 1):
-            self.cost[iy][ix] = None  # mark as obstacle
 
 def apply_homography(px: float, py: float) -> Tuple[float, float]:
     """
@@ -247,18 +205,25 @@ class BatteryModel:
     TODO: Replace the simple model with PyBaMM-based logic once ready.
     """
 
-    def __init__(self, power_w=15.0, nominal_speed_mps=0.2, station_specs=None):
-        self.power_w = power_w
-        self.speed_mps = nominal_speed_mps
-        self.station_specs = station_specs 
+    def __init__(self,
+                 drive_power_w: float = 15.0,
+                 nominal_speed_mps: float = 0.2) -> None:
+        self.drive_power_w = drive_power_w
+        self.nominal_speed_mps = nominal_speed_mps
 
-    def soc_drop_for_distance(self, distance_m, soc_start, station_label=None):
-        if station_label and station_label in self.station_specs:
-            specs = self.station_specs[station_label]
-            return soc_drop_for_distance(specs, distance_m, self.power_w, self.speed_mps)
-        # default model
-        time_sec = distance_m / self.speed_mps
-        energy_used_j = self.power_w * time_sec
+    def soc_drop_for_distance(self, distance_m: float, soc_start: float) -> float:
+        """
+        Estimate SOC drop for traveling 'distance_m', starting from 'soc_start'.
+
+        CURRENT IMPLEMENTATION:
+            Simple constant power model using DRIVE_POWER_W and nominal speed.
+
+        REAL IMPLEMENTATION (LATER):
+            Use PyBaMM to compute energy per meter or SOC as function of distance/time,
+            and plug that into this function.
+        """
+        time_sec = distance_m / self.nominal_speed_mps
+        energy_used_j = self.drive_power_w * time_sec
         soc_drop = 100.0 * (energy_used_j / BATTERY_CAPACITY_J)
         return soc_drop
 
@@ -443,30 +408,39 @@ def plan_mission_ordered(
 # EXPORT FOR UNREAL (WAYPOINT JSON)
 # =======================================
 
-def get_path_json(
+def export_path_to_unreal_json(
     grid: GridMap,
     path: List[GridCell],
-) -> str:
+    mission_id: str,
+    file_path: str = "mission_plan.json",
+) -> None:
     """
     Convert a grid path into Unreal world coordinates and write mission_plan.json.
 
     This is the ONLY thing Unreal cares about from this module.
     Sam will load this file on his side and move the rover along these waypoints.
     """
-    waypoints = {}
+    waypoints = []
     for i, cell in enumerate(path):
         x_m, y_m = grid.cell_center_world_m(cell)
-        waypoints[i] = {
+        wp = {
+            "name": f"WP_{i}",
             "x": x_m * UNREAL_UNITS_PER_METER,
             "y": y_m * UNREAL_UNITS_PER_METER,
-            "z": 0.0
+            "z": 0.0,
         }
+        waypoints.append(wp)
 
-    data = {"Path": waypoints}
+    data = {
+        "mission_id": mission_id,
+        "waypoints": waypoints,
+    }
 
-    json_string = json.dumps(data, indent=2)
-    print(f"[planner] Mission plan JSON string generated")
-    return json_string
+    with open(file_path, "w") as f:
+        json.dump(data, f, indent=2)
+
+    print(f"[planner] Mission plan written to {file_path}")
+
 
 # =======================================
 # INTEGRATION ENTRYPOINT (FOR MQTT WRAPPER)
@@ -477,9 +451,11 @@ def plan_from_vision_message(
     mission_objective_labels: List[str],
     rover_label: str,
     start_soc: float,
+    mission_id: str,
     cost_grid: Optional[List[List[Optional[float]]]] = None,
-    battery_model: Optional[BatteryModel] = None
-):
+    battery_model: Optional[BatteryModel] = None,
+    output_path: str = "mission_plan.json",
+) -> None:
     """
     This is the function your MQTT wrapper should call.
 
@@ -506,6 +482,8 @@ def plan_from_vision_message(
     # 1) Build grid
     grid = GridMap(GRID_WIDTH, GRID_HEIGHT, cost=cost_grid)
 
+    # TODO: if we have fixed battery station cells, call grid.add_battery_cell(ix, iy) here.
+
     # 2) Build BBox list from vision_msg
     bboxes: List[BBox] = []
     for obj in vision_msg.get("objects", []):
@@ -518,13 +496,6 @@ def plan_from_vision_message(
                 h=float(obj["h"]),
             )
         )
-
-    # Add battery cells based on object labels
-    for b in bboxes:
-        if b.label in {"blue", "red"}:   # your battery stations
-            cell = pixel_bbox_to_grid_cell(b, grid)
-            grid.add_battery_cell(cell.ix, cell.iy)
-            print(f"[planner] Added battery station at cell {cell.ix}, {cell.iy}")
 
     # 3) Battery model
     if battery_model is None:
@@ -545,225 +516,9 @@ def plan_from_vision_message(
     print(f"[planner] Final SOC: {final_soc:.1f}%")
 
     # 5) Export for Unreal
-    path_json = get_path_json(
+    export_path_to_unreal_json(
         grid=grid,
-        path=full_path    )
-
-    return path_json
-
-def on_message(client, userdata, msg):
-    global sta1Update, sta2Update, sta1Info, sta2Info
-    payload = msg.payload.decode()
-
-    if msg.topic == "Sta1":
-        sta1Info = json.loads(payload)
-        print(f"[Sta1] {sta1Info}")
-        sta1Update = True
-    elif msg.topic == "Sta2":
-        sta2Info = json.loads(payload)
-        print(f"[Sta2] {sta2Info}")
-        sta2Update = True
-    elif msg.topic == "Pos":
-        objectPositions = payload
-        print(f"[Pos] {objectPositions}")
-        pos_updated(objectPositions)
-
-def pos_updated(objectPositions):
-    global sta1Update, sta2Update, planning
-    if not (sta1Update and sta2Update) or planning:
-        return
-    threading.Thread(target=pos_cont, args=(objectPositions,)).start()
-
-def pos_cont(objectPositions):
-    global battery, vision_msg, sta1Update, sta2Update, sta1Info, sta2Info, path_json, planning, mqttc, MQTTTOPICPATH
-    planning = True
-    data = json.loads(objectPositions)
-
-    # Step 2 — convert to planner input format
-    vision_msg = {
-        "objects": [
-            {
-                "label": label,
-                "x": box["x"],
-                "y": box["y"],
-                "w": box["w"],
-                "h": box["h"]
-            }
-            for label, box in data.items()
-        ]
-    }
-
-    for obj in vision_msg["objects"]:
-        if obj["label"] == "black":
-            obj["label"] = "rover"
-
-    print(vision_msg)
-
-    battery = BatteryModel(station_specs={"blue": sta1Info, "red": sta2Info})
-
-    '''path_json = plan_from_vision_message(
-    vision_msg=vision_msg,
-    mission_objective_labels=mission_labels,
-    rover_label="rover",
-    start_soc=start_soc,
-    cost_grid=cost_grid,
-    battery_model=battery)
-
-    print(path_json)'''
-
-    path_order = {"Path": find_order(vision_msg)}
-
-    mqttc.publish(MQTTTOPICPATH, json.dumps(path_order))
-
-    sta1Update = False
-    sta2Update = False
-    planning = False
-
-# Objective, battery, x2, origin
-def find_order(vision_msg):
-    objects = vision_msg["objects"]
-
-    # ---- Build corner groups ----
-    def get_corners(obj):
-        return [
-            (obj['x'], obj['y']),
-            (obj['x'] + obj['w'], obj['y']),
-            (obj['x'], obj['y'] + obj['h']),
-            (obj['x'] + obj['w'], obj['y'] + obj['h'])
-        ]
-
-    # Battery 1 corners: 0–3, battery 2 corners: 4–7
-    bat_corners = [
-        get_corners(objects[0]),
-        get_corners(objects[1])
-    ]
-
-    # Objective 1: objects[2], Objective 2: [3], Objective 3: [4]
-    obj_corners = [
-        get_corners(objects[2]),
-        get_corners(objects[3]),
-    ]
-
-    # Origin reference is OBJECT 3 (objects[4])
-    origin_x = objects[4]['x']
-    origin_y = objects[4]['y']
-
-    path = {}
-    step = 1
-
-    # ---- Helper to find closest corner among a group ----
-    def closest_corner(ref_x, ref_y, corners):
-        best = None
-        best_dist = float('inf')
-        for (cx, cy) in corners:
-            d = euclid_dist(ref_x, ref_y, cx, cy)
-            if d < best_dist:
-                best_dist = d
-                best = (cx, cy)
-        return best, best_dist
-
-    # ---- Helper to find closest OBJECT among the remaining ones ----
-    def closest_object(ref_x, ref_y, obj_list):
-        best_idx = None
-        best_corner = None
-        best_dist = float('inf')
-
-        for idx, corners in obj_list:
-            corner, dist = closest_corner(ref_x, ref_y, corners)
-            if dist < best_dist:
-                best_idx = idx
-                best_corner = corner
-                best_dist = dist
-
-        return best_idx, best_corner
-
-    # ---- Step 1: Choose first objective ----
-    remaining_objs = [(0, obj_corners[0]), (1, obj_corners[1])]  # objective 0 & 1 (skip origin)
-    first_idx, first_corner = closest_object(origin_x, origin_y, remaining_objs)
-
-    path[step] = {"x": first_corner[0], "y": first_corner[1], "z": 0.0}
-    step += 1
-
-    # Update reference point
-    ref_x, ref_y = first_corner
-
-    # ---- Step 2: Closest battery to this point ----
-    bat_idx, bat_corner = closest_object(ref_x, ref_y, [(0, bat_corners[0]), (1, bat_corners[1])])
-
-    path[step] = {"x": bat_corner[0], "y": bat_corner[1], "z": 0.0}
-    step += 1
-
-    ref_x, ref_y = bat_corner
-
-    # ---- Step 3: Second objective (the one not chosen before) ----
-    remaining_objs = [(1-first_idx, obj_corners[1-first_idx])]
-    second_idx, second_corner = closest_object(ref_x, ref_y, remaining_objs)
-
-    path[step] = {"x": second_corner[0], "y": second_corner[1], "z": 0.0}
-    step += 1
-
-    ref_x, ref_y = second_corner
-
-    # ---- Step 4: Other battery ----
-    remaining_bat = 1 - bat_idx
-    other_bat_corner, _ = closest_corner(ref_x, ref_y, bat_corners[remaining_bat])
-
-    path[step] = {"x": other_bat_corner[0], "y": other_bat_corner[1], "z": 0.0}
-    step += 1
-
-    # ---- Step 5: Return to origin ----
-    path[step] = {"x": origin_x, "y": origin_y, "z": 0.0}
-
-    return path
-
-def euclid_dist(x1, x2, y1, y2):
-    import math
-    return math.sqrt((x2 - x1)**2 + (y2 - y1)**2)
-
-# --- Main Function ---
-
-if __name__ == "__main__":
-    planning = False
-    latest = None
-    battery = None
-    vision_msg = None
-    objectPositions = None
-    sta1Info = None
-    sta2Info = None
-    sta1Update = False
-    sta2Update = False
-    cost_grid = None  
-    path_json = None
-
-    # --- Choose mission order ---
-    mission_labels = ["yellow", "green"]
-    battery_labels = ["blue", "red"]
-
-    # --- Start SOC ---
-    start_soc = 100.0
-
-    MQTTHOST = "10.3.141.1"
-    MQTTPORT = 1883
-    MQTTTOPICSTA1 = "Sta1"
-    MQTTTOPICSTA2 = "Sta2"
-    MQTTTOPICPOS = "Pos"
-    MQTTTOPICPATH = "Path"
-
-    mqttc = mqtt.Client()
-    mqttc.on_message = on_message
-    mqttc.connect(MQTTHOST, MQTTPORT)
-
-    mqttc.subscribe(MQTTTOPICPOS)
-    mqttc.subscribe(MQTTTOPICSTA1)
-    mqttc.subscribe(MQTTTOPICSTA2)
-
-    mqttc.loop_start()
-
-    try:
-        while True:
-            import time
-            time.sleep(1)
-    except KeyboardInterrupt:
-        print("\n[planner] Exiting...")
-        mqttc.loop_stop()
-        mqttc.disconnect()
+        path=full_path,
+        mission_id=mission_id,
+        file_path=output_path,
+    )
